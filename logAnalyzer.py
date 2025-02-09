@@ -4,6 +4,7 @@ import json
 import os
 import platform
 import pyfiglet
+import csv
 from collections import defaultdict, Counter
 from colorama import Fore, Style
 
@@ -32,6 +33,13 @@ print('\n' + print_colored(pyfiglet.figlet_format("Log Analyzer",
 # Define regex pattern to match failed login attempts (Linux auth.log example)
 FAILED_LOGIN_PATTERN = re.compile(
     r"Failed password for (?:invalid user )?(\S+) from (\S+) port")
+
+APACHE_ACCESS_PATTERN = re.compile(
+    r'(\d+\.\d+\.\d+\.\d+) - - \[(.*?)\] "(GET|POST|PUT|DELETE) (.*?) HTTP/.*" (\d+) (\d+)')
+
+WINDOWS_EVENT_PATTERN = re.compile(
+    r'EventID=(\d+).*User=(\S+).*Source=(\S+)'
+)
 
 
 def parse_log(file_path):
@@ -151,7 +159,7 @@ def save_report(data, log_entries, skipped_lines, output_format):
     with open(output_file, 'w') as f:
         if output_format == 'json':
             json.dump(report_content, f, indent=4)
-        else:
+        elif output_format == 'text':
             f.write("---------> Log Analysis Report <---------\n")
             f.write("\n========== Failed Login Attempts ==========")
             f.write("\nNone detected\n" if not data else "\n".join(
@@ -166,6 +174,25 @@ def save_report(data, log_entries, skipped_lines, output_format):
             f.write(f"{skipped_lines} lines skipped due to formatting issues.")
         print(
             f"{Style.BRIGHT}{Fore.CYAN}Report saved as: {Style.RESET_ALL}{output_file}")
+
+
+def save_as_csv(failed_attempts, log_entries, skipped_lines, output_format):
+    output_file = f"logAnalyzer_Output.{output_format}"
+
+    with open(output_file, 'w', newline="") as file:
+        if output_format == 'csv':
+            writer = csv.writer(file)
+            writer.writerow(["Category", "Value", "Count"])
+
+            for entry, count in log_entries.items():
+                writer.writerow(["Log Entry", entry, count])
+
+            for ip, count in failed_attempts.items():
+                writer.writerow(["Failed Login", ip, count])
+
+            writer.writerow(["Malformed Lines", "N/A", skipped_lines])
+
+    print("Report saved as log_analysis.csv")
 
 
 def main():
@@ -185,14 +212,20 @@ def main():
         if save_prompt in ["yes", "y"]:
             while attempts < 3:
                 format_choice = input(
-                    "Choose format - 'text' or 'json': ").strip().lower()
+                    "Choose format - 'text', 'csv' or 'json': ").strip().lower()
                 if format_choice in ["text", "json"]:
                     save_report(failed_attempts, log_entries,
                                 skipped_lines, format_choice)
                     break
-                print("Invalid choice. Please enter 'text' or 'json'.")
-                attempts += 1
+                elif format_choice == "csv":
+                    save_as_csv(failed_attempts, log_entries,
+                                skipped_lines, format_choice)
+                    break
+                else:
+                    print("Invalid choice. Please enter 'text', 'csv' or 'json'.")
+                    attempts += 1
             break
+
         elif save_prompt in ["no", "n"]:
             print("Report will not be saved.")
             break
