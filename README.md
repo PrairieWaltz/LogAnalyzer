@@ -98,7 +98,7 @@ The tool offers an option to save results:
 
 ```sh
 Would you like to save the report? (yes/no): yes
-Choose format - 'text' or 'json': json
+Choose format - 'text', 'csv' or 'json': json
 Report saved as: logAnalyzer_Output.json
 ```
 
