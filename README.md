@@ -1,7 +1,5 @@
 ## Log Analyzer
 
-![Log Analyzer](logAnalyzer_Main.png)
-
 A Python-based log analysis tool that scans system log files for failed login attempts, log frequencies, and other key insights. This tool provides both textual and graphical output options and can export results in JSON or plain text formats.
 
 ## 📌 Synopsis
