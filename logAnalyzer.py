@@ -1,0 +1,210 @@
+import argparse
+import re
+import json
+import os
+import platform
+import pyfiglet
+from collections import defaultdict, Counter
+from colorama import Fore, Style
+
+
+def print_section_header(title):
+    print(f"\n{Fore.CYAN}{title}\n{'----->'}{Style.RESET_ALL}")
+
+
+def print_colored(text, color=Fore.WHITE, style=Style.RESET_ALL):
+    return f"{style}{color}{text}{Style.RESET_ALL}"
+
+
+def prompt_for_file():
+    """Prompt user to enter a valid log file path."""
+    while True:
+        file_path = input(
+            "Please enter full path to your log file (.log or .txt only): ").strip()
+        if os.path.exists(file_path) and file_path.lower().endswith(('.log', '.txt')):
+            return file_path
+        print("Invalid file. Please enter a valid .log or .txt file.")
+
+
+print('\n' + print_colored(pyfiglet.figlet_format("Log Analyzer",
+      font='slant'), Fore.GREEN, Style.BRIGHT))
+
+# Define regex pattern to match failed login attempts (Linux auth.log example)
+FAILED_LOGIN_PATTERN = re.compile(
+    r"Failed password for (?:invalid user )?(\S+) from (\S+) port")
+
+
+def parse_log(file_path):
+    """Parses the log file for various insights."""
+    failed_attempts = defaultdict(int)
+    log_entries = Counter()
+    skipped_lines = 0
+
+    try:
+        with open(file_path, 'r', encoding='utf-8-sig', errors='replace') as log_file:
+            for line in log_file:
+                if not line.strip():  # Skip empty lines (if any)
+                    continue
+
+                parts = line.split()
+                if len(parts) < 2:  # avoid index errors on short lines
+                    skipped_lines += 1
+                    continue
+
+                # Count occurrences of first word (timestamp, log type, etc)
+                key = parts[0].replace('\u0000', '').strip()
+                key = key if key else "[Unknown Entry]"
+                log_entries[key] += 1
+
+                match = FAILED_LOGIN_PATTERN.search(line)
+                if match:
+                    user, ip = match.groups()
+                    failed_attempts[ip] += 1
+    except FileNotFoundError:
+        print("Error: Log file not found.")
+        return {}, Counter(), 0
+    except PermissionError:
+        print("Error: Permission denied. Try running with elevated privileges.")
+        return {}, Counter(), 0
+    except Exception as e:
+        print(f"Error reading log file: {e}")
+        return {}, Counter(), 0
+
+    return failed_attempts, log_entries, skipped_lines
+
+
+def display_results(log_entries, failed_attempts, skipped_lines):
+    """Allows user to choose between graph or text output with a combined design."""
+    while True:
+        choice = input(
+            f"Would you like to see results as (1) Graph or (2) Text? \nEnter 1 or 2: ").strip()
+        if choice == "1":
+            print_section_header("Graph Output")
+        elif choice == "2":
+            print_section_header("Text Output")
+        else:
+            print("Invalid choice. Please enter 1 for Graphs or 2 for Text.")
+            continue
+
+        print_section_header("Log Entry Frequency")
+        if log_entries:
+            max_label_length = max(len(label) for label in log_entries.keys())
+            max_count = max(log_entries.values())
+            for label, count in log_entries.most_common(10):
+                bar = "*" * int((count / max_count) * 40)
+                print(f"{label.ljust(max_label_length)} | {bar} {count}" if choice ==
+                      "1" else f"{label}: {count} occurrences")
+        else:
+            print("No log entry data found.")
+
+        print_section_header("Failed Login Attempts")
+        if failed_attempts:
+            max_label_length = max(len(ip) for ip in failed_attempts.keys())
+            max_count = max(failed_attempts.values())
+            for ip, count in failed_attempts.most_common(5):
+                bar = "*" * int((count / max_count) * 40)
+                print(f"{ip.ljust(max_label_length)} | {bar} {count}" if choice ==
+                      "1" else f"{ip}: {count} failed attempts")
+        else:
+            print("No failed login attempts detected.")
+
+        print_section_header("Top Attack Sources")
+        if failed_attempts:
+            max_label_length = max(len(ip) for ip in failed_attempts.keys())
+            max_count = max(failed_attempts.values())
+            for ip, count in failed_attempts.most_common(5):
+                bar = "*" * int((count / max_count) * 40)
+                print(f"{ip.ljust(max_label_length)} | {bar} {count}" if choice ==
+                      "1" else f"{ip}: {count} failed attempts")
+        else:
+            print("No attack sources detected.")
+
+        print_section_header("Malformed Lines")
+        if skipped_lines > 0:
+            bar = "*" * min(40, skipped_lines // 5)
+            print(f"Malformed Lines | {bar} {skipped_lines}" if choice ==
+                  "1" else f"Malformed lines encountered: {skipped_lines} ")
+        else:
+            print("No malformed lines found.")
+
+        break
+
+
+def save_report(data, log_entries, skipped_lines, output_format):
+    """Saves the parsed data to a file in the specified format."""
+    output_file = f"logAnalyzer_Output.{output_format}"
+
+    if not data and not log_entries:
+        print("No significant log data detected.")
+        return
+
+    clean_log_summary = Counter(
+        {key.replace('\u0000', ''): value for key, value in log_entries.items()})
+
+    report_content = {
+        "failed_logins": data if data else "None detected",
+        "top_attack_ips": dict(data.most_common(5)) if data else "None detected",
+        "log_summary": dict(clean_log_summary.most_common(10)),
+        "skipped_lines": skipped_lines
+    }
+
+    with open(output_file, 'w') as f:
+        if output_format == 'json':
+            json.dump(report_content, f, indent=4)
+        else:
+            f.write("---------> Log Analysis Report <---------\n")
+            f.write("\n========== Failed Login Attempts ==========")
+            f.write("\nNone detected\n" if not data else "\n".join(
+                f"{ip}: {count} failed attempts" for ip, count in data.items()))
+            f.write("\n========== TOP ATTACK SOURCES ==========")
+            f.write("\nNone detected\n" if not data else "\n".join(
+                f"{ip}: {count} failed attempts" for ip, count in data.items()))
+            f.write("\n========== Top 10 Log Entries ==========\n")
+            f.write("\n".join(f"{entry}:{count} occurrences" for entry,
+                    count in clean_log_summary.most_common(10)))
+            f.write(f"\n\n========== Skipped Malformed Lines ==========\n")
+            f.write(f"{skipped_lines} lines skipped due to formatting issues.")
+        print(
+            f"{Style.BRIGHT}{Fore.CYAN}Report saved as: {Style.RESET_ALL}{output_file}")
+
+
+def main():
+    log_file = prompt_for_file()
+
+    print_section_header("Using Log File")
+    print(print_colored(log_file, Fore.CYAN, Style.BRIGHT))
+    print(print_colored(f"\nParsing Log File...", Fore.YELLOW, Style.BRIGHT))
+
+    failed_attempts, log_entries, skipped_lines = parse_log(log_file)
+    display_results(log_entries, failed_attempts, skipped_lines)
+
+    attempts = 0
+    while attempts < 3:
+        save_prompt = input(
+            "\nWould you like to save the report? (yes/no): ").strip().lower()
+        if save_prompt in ["yes", "y"]:
+            while attempts < 3:
+                format_choice = input(
+                    "Choose format - 'text' or 'json': ").strip().lower()
+                if format_choice in ["text", "json"]:
+                    save_report(failed_attempts, log_entries,
+                                skipped_lines, format_choice)
+                    break
+                print("Invalid choice. Please enter 'text' or 'json'.")
+                attempts += 1
+            break
+        elif save_prompt in ["no", "n"]:
+            print("Report will not be saved.")
+            break
+        else:
+            print("Invalid choice. Please enter 'yes' or 'no'.")
+            attempts += 1
+
+    if attempts >= 3:
+        print("Get it together. Exiting...")
+
+    print(print_colored(f"\nAnalysis complete.\n", Fore.YELLOW, Style.BRIGHT))
+
+
+if __name__ == "__main__":
+    main()
